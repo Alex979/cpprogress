@@ -118,11 +118,11 @@ class Bar {
                                          fmt::arg("percent", percent * 100),
                                          fmt::arg("elapsed", elapsed));
 
+        // Clear the cursor
+        std::cout << "\e[?25l";
+
         if (displayed_once) {
             std::cout << "\r";
-        } else {
-            // Clear the cursor
-            std::cout << "\e[?25l";
         }
 
         if (!name.empty()) {
@@ -138,10 +138,9 @@ class Bar {
         }
         std::cout << caps.second << " ";
         std::cout << suffix;
-        displayed_once = true;
 
         int line_width = name.length() + caps.first.length() + width +
-                         caps.second.length() + suffix.length() + 2;
+                         caps.second.length() + suffix.length() + name.length() == 0 ? 1 : 2;
         // If this line was not as long as the previous line, fill in spaces to
         // fully clear the previous output
         if (last_line_width > line_width) {
@@ -150,6 +149,7 @@ class Bar {
             }
         }
         last_line_width = line_width;
+        displayed_once = true;
         std::cout << std::flush;
     }
 
