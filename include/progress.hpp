@@ -10,10 +10,19 @@
 #include <utility>
 
 #define FMT_HEADER_ONLY
-#include "fmt/core.h"
 #include "fmt/chrono.h"
+#include "fmt/core.h"
 
 namespace Progress {
+
+namespace {
+// Define private constants for BarOptions and Bar
+const uint16_t DEFAULT_WIDTH{40};
+const std::pair<std::string, std::string> DEFAULT_CAPS{"|", "|"};
+const std::string DEFAULT_FORMAT{"{current}/{max}"};
+const char DEFAULT_FILL{'#'};
+
+}  // namespace
 
 class Bar;
 
@@ -21,27 +30,27 @@ class BarOptions {
     friend class Bar;
 
    private:
-    int max_;
-    int width_;
+    size_t max_;
+    uint16_t width_;
     std::string name_;
     std::pair<std::string, std::string> caps_;
     std::string format_;
     char fill_;
 
    public:
-    BarOptions(int max)
-        : max_(max),
-          width_(40),
-          caps_({"|", "|"}),
-          format_("{current}/{max}"),
-          fill_('#'){};
+    BarOptions(size_t max)
+        : max_{max},
+          width_{DEFAULT_WIDTH},
+          caps_{DEFAULT_CAPS},
+          format_{DEFAULT_FORMAT},
+          fill_{DEFAULT_FILL} {};
 
     BarOptions &name(const std::string &name) {
         name_ = name;
         return *this;
     }
 
-    BarOptions &width(int width) {
+    BarOptions &width(uint16_t width) {
         width_ = width;
         return *this;
     }
@@ -64,13 +73,13 @@ class BarOptions {
 
 class Bar {
    private:
-    int max;
-    int current = 0;
-    int width = 40;
+    size_t max;
+    size_t current = 0;
+    uint16_t width = 40;
     float percent = 0;
     bool displayed_once;
     bool is_done = false;
-    int last_line_width = 0;
+    size_t last_line_width = 0;
     std::string name;
     std::pair<std::string, std::string> caps;
     std::string format;
@@ -85,7 +94,7 @@ class Bar {
         do {
             std::unique_lock<std::mutex> lk(m);
             display();
-            int current_old = current;
+            size_t current_old = current;
             cv.wait(lk, [this, current_old] {
                 return current > current_old || is_done;
             });
@@ -93,66 +102,84 @@ class Bar {
     }
 
    public:
-    Bar(int max, const std::string &name = "")
-        : max(max),
-          width(40),
-          name(name),
-          caps({"|", "|"}),
-          format("{current}/{max}"),
-          fill('#'),
-          start_time(std::chrono::steady_clock::now()){};
+    Bar(size_t max)
+        : max{max},
+          width{DEFAULT_WIDTH},
+          caps{DEFAULT_CAPS},
+          format{DEFAULT_FORMAT},
+          fill{DEFAULT_FILL},
+          start_time{std::chrono::steady_clock::now()} {};
+    Bar(size_t max, const std::string &name)
+        : max{max},
+          width{DEFAULT_WIDTH},
+          name{name},
+          caps{DEFAULT_CAPS},
+          format{DEFAULT_FORMAT},
+          fill{DEFAULT_FILL},
+          start_time{std::chrono::steady_clock::now()} {};
     Bar(const BarOptions &options)
-        : max(options.max_),
-          width(options.width_),
-          name(options.name_),
-          caps(options.caps_),
-          format(options.format_),
-          fill(options.fill_),
-          start_time(std::chrono::steady_clock::now()){};
+        : max{options.max_},
+          width{options.width_},
+          name{options.name_},
+          caps{options.caps_},
+          format{options.format_},
+          fill{options.fill_},
+          start_time{std::chrono::steady_clock::now()} {};
 
+    // Prints the progress bar to stdout, overwriting any output from a previous
+    // call to display()
     void display() {
-        int i;
-        int current_progress = percent * width;
-        std::string suffix = fmt::format(format, fmt::arg("current", current),
-                                         fmt::arg("max", max),
-                                         fmt::arg("percent", percent * 100),
-                                         fmt::arg("elapsed", elapsed));
-
         // Clear the cursor
         std::cout << "\e[?25l";
 
+        // If the bar has displayed once before, return the cursor to the start
+        // of the line and overwrite
         if (displayed_once) {
             std::cout << "\r";
         }
 
+        // Format name like so: "Name |#####...."
         if (!name.empty()) {
             std::cout << name << " ";
         }
 
+        // Print the starting cap of the bar, the completed progress of the bar,
+        // the remaining progress of the bar, and finally the end cap
         std::cout << caps.first;
-        for (i = 0; i < current_progress; i++) {
+        uint16_t current_progress = percent * width;
+        for (uint16_t i = 0; i < current_progress; i++) {
             std::cout << fill;
         }
-        for (i = 0; i < width - current_progress; i++) {
+        for (uint16_t i = 0; i < width - current_progress; i++) {
             std::cout << " ";
         }
         std::cout << caps.second << " ";
+
+        // Format the bar suffix info with the user-provided or default format
+        // string
+        std::string suffix = fmt::format(
+            format, fmt::arg("current", current), fmt::arg("max", max),
+            fmt::arg("percent", percent * 100), fmt::arg("elapsed", elapsed));
         std::cout << suffix;
 
-        int line_width = name.length() + caps.first.length() + width +
-                         caps.second.length() + suffix.length() + name.length() == 0 ? 1 : 2;
-        // If this line was not as long as the previous line, fill in spaces to
-        // fully clear the previous output
+        // Calculate the total width in characters of this display call. If it
+        // isn't as long as the previous display, clear the remaining characters
+        // with spaces
+        size_t line_width = name.length() + caps.first.length() + width +
+                            caps.second.length() + suffix.length() +
+                            (name.length() == 0 ? 1 : 2);
         if (last_line_width > line_width) {
-            for (i = 0; i < last_line_width - line_width; i++) {
+            for (size_t i = 0; i < last_line_width - line_width; i++) {
                 std::cout << ' ';
             }
         }
+
         last_line_width = line_width;
         displayed_once = true;
         std::cout << std::flush;
     }
 
+    // Increments the progress bar
     void next() {
         std::unique_lock<std::mutex> lk(m);
         current++;
@@ -163,7 +190,8 @@ class Bar {
         cv.notify_one();
     }
 
-    // Print a newline and re-enable the cursor
+    // Print a newline and re-enable the cursor. Also joins the thread started
+    // by run_async if applicable.
     void done() {
         std::unique_lock<std::mutex> lk(m);
         if (bar_thread.joinable()) {
@@ -176,17 +204,21 @@ class Bar {
         std::cout << "\n\e[?25h";
     }
 
+    // Blocking function that continuously displays the updated state of the
+    // progress bar until it is completely full
     void run_until_full() {
         do {
             std::unique_lock<std::mutex> lk(m);
             display();
-            int current_old = current;
+            size_t current_old = current;
             cv.wait(lk, [this, current_old] { return current > current_old; });
         } while (current < max);
 
         done();
     }
 
+    // Asynchronous function that continously displays the updated state of the
+    // progress bar in a separate thread, until done() is called
     void run_async() {
         std::lock_guard<std::mutex> lk(m);
         if (bar_thread.joinable()) {
